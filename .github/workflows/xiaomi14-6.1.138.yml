@@ -1,0 +1,115 @@
+name: Xiaomi 14 Android14 6.1.138 Build
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelsu_commit:
+        description: "指定 KernelSU commit hash (可选)"
+        required: false
+        type: string
+        default: ""
+      susfs_commit:
+        description: "指定 SUSFS commit (可选)"
+        required: false
+        type: string
+        default: ""
+      kernelsu_version:
+        description: "SukiSU 版本"
+        required: true
+        type: choice
+        options:
+          - Stable(标准)
+          - Dev(开发)
+        default: Stable(标准)
+
+env:
+  PYTHON_VERSION: "3.10"
+  ANDROID_VERSION: "android14"
+  KERNEL_VERSION: "6.1"
+  SUB_LEVEL: "138"
+  OS_PATCH_LEVEL: "2025-06"
+  CUSTOM_VERSION: "-android14-11-g965475777129-mi"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+          remove-large-packages: "true"
+          remove-swapfile: "true"
+          verbose: "true"
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y ccache python3 git curl wget zip unzip
+          pip install PyYAML
+
+      - name: Configure ccache
+        run: |
+          mkdir -p ~/.cache/bazel
+          ccache --version
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: xiaomi14-android14-6.1-138-ccache-${{ github.sha }}
+          restore-keys: |
+            xiaomi14-android14-6.1-138-ccache-
+
+      - name: Build Xiaomi 14 preset
+        run: |
+          cd ./.github/workflows/scripts
+
+          ARGS="--android ${{ env.ANDROID_VERSION }}"
+          ARGS="$ARGS --kernel ${{ env.KERNEL_VERSION }}"
+          ARGS="$ARGS --sub-level ${{ env.SUB_LEVEL }}"
+          ARGS="$ARGS --os-patch ${{ env.OS_PATCH_LEVEL }}"
+          ARGS="$ARGS --ksu-version ${{ github.event.inputs.kernelsu_version }}"
+          ARGS="$ARGS --custom-version=${{ env.CUSTOM_VERSION }}"
+          ARGS="$ARGS --no-kpm"
+          ARGS="$ARGS --no-release"
+
+          [ -z "${{ github.event.inputs.kernelsu_commit }}" ] || ARGS="$ARGS --ksu-commit=${{ github.event.inputs.kernelsu_commit }}"
+          [ -z "${{ github.event.inputs.susfs_commit }}" ] || ARGS="$ARGS --susfs-commit=${{ github.event.inputs.susfs_commit }}"
+
+          python3 build.py $ARGS
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          find /tmp/gki-build -name "*.zip" -type f -exec cp {} artifacts/ \;
+          find /tmp/gki-build -name "*.img" -type f -exec cp {} artifacts/ \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: xiaomi14-android14-6.1.138
+          path: artifacts/*
+
+      - name: Generate checksums
+        run: |
+          sha256sum artifacts/* > SHA256SUMS.txt
+          cat SHA256SUMS.txt

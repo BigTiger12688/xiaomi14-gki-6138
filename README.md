@@ -40,6 +40,9 @@ pip install PyYAML
 # 构建单个版本
 python build.py --android android14 --kernel 6.1 --sub-level 124 --os-patch 2025-02
 
+# Xiaomi 14 / Android 14 / 6.1.138 稳定预设
+python build.py --android android14 --kernel 6.1 --sub-level 138 --os-patch 2025-06 --custom-version=-android14-11-g965475777129-mi --no-kpm
+
 # 构建整个矩阵
 python build.py --matrix android14-6.1
 
@@ -66,10 +69,10 @@ python build.py --list-matrix
 |---------|--------|------------|----------|
 | 12 | 5.10 | 136, 198, 209, 236, X (LTS) | 2022-11 ~ 2025-05 |
 | 13 | 5.15 | 74, 123, 148, 170, 178, 180 | 2023-01 ~ 2025-05 |
-| 14 | 6.1 | 78, 90, 99, 124, 145 | 2024-06 ~ 2025-09 |
+| 14 | 6.1 | 78, 90, 99, 124, 138, 145 | 2024-06 ~ 2025-09 |
 | 15 | 6.6 | 50, 66, 102 | 2024-10 ~ 2025-10 |
 
-总计 **19 个版本组合**
+总计 **20 个版本组合**
 
 ---
 
@@ -165,6 +168,19 @@ fastboot flash boot <boot.img文件全称>
 - LTS 随着 GKI 源码更新，编译版本号将持续递增
 - ⚠️ 注意：LTS 虽为最新，但最新版 ≠ 最稳定（如 6.6.x 存在自动重启 BUG）
 
+### 1.1 Xiaomi 14 `6.1.138-android14-11-g965475777129-mi`
+
+如果更高子版本（如 `6.1.145 / 2025-09`）在设备上出现屏幕闪烁或其他异常，建议优先回退到更接近当前系统的 `android14-6.1.138 / 2025-06` 进行构建。
+
+推荐首次构建保持最小变量：
+- `sub_level`: `138`
+- `os_patch_level`: `2025-06`
+- `custom_version`: `-android14-11-g965475777129-mi`
+- `use_kpm`: `false`
+- `use_zram`: `false`
+- `BBG`: `false`
+- `set_defbbr`: `false`
+
 ### 2. 内核版本伪装方法
 
 在 MT 管理器终端执行：
@@ -180,6 +196,7 @@ uname -r | sed 's/^[^-]*//'
 {
   "android14-6.1": [
     {"sub_level": "124", "os_patch_level": "2025-02"},
+    {"sub_level": "138", "os_patch_level": "2025-06"},
     {"sub_level": "145", "os_patch_level": "2025-09"}
   ]
 }
