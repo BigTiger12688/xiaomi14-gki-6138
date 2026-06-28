@@ -346,13 +346,20 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             self._fix_base_c_header()
             if "goto show_pad;" in content:
                 content = content.replace("goto show_pad;", "return 0;")
-                with open(task_mmu, "w") as f:
-                    f.write(content)
+            content = self._cleanup_task_mmu_dead_code(content)
+            with open(task_mmu, "w") as f:
+                f.write(content)
         elif fb in ["android12-5.10", "android13-5.10", "android13-5.15"] and "if (!vma_pages(vma))" not in content:
             if "goto show_pad;" in content:
                 content = content.replace("goto show_pad;", "return 0;")
                 with open(task_mmu, "w") as f:
                     f.write(content)
+
+    def _cleanup_task_mmu_dead_code(self, content: str) -> str:
+        content = re.sub(r"^(\s*)struct dentry \*dentry;\n", "", content, flags=re.MULTILINE)
+        if "goto bypass;" not in content:
+            content = re.sub(r"^(\s*)bypass:\n", "", content, flags=re.MULTILINE)
+        return content
 
     def _fix_base_c_header(self):
         base_c = self.work_dir / "common/fs/proc/base.c"
