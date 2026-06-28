@@ -465,6 +465,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         self._chdir(self.work_dir)
         MAX_CUSTOM_LEN = 48
         safe_custom_version = ""
+        use_config_localversion = self.config.custom_version and not (self.work_dir / "build/build.sh").exists()
         if self.config.custom_version:
             safe_custom_version = self.config.custom_version.rstrip('-')[:MAX_CUSTOM_LEN]
 
@@ -472,7 +473,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if setlocalversion.exists():
             with open(setlocalversion, "r", encoding="utf-8") as f:
                 content = f.read()
-            if safe_custom_version:
+            if safe_custom_version and not use_config_localversion:
                 lines = content.split('\n')
                 for i, line in enumerate(lines):
                     if 'echo "$res"' in line and not line.strip().startswith('#'):
