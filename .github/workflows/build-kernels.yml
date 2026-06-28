@@ -66,7 +66,7 @@ jobs:
       SCRIPTS_DIR: ./.github/workflows/scripts
     outputs:
       build_matrix: ${{ steps.generate.outputs.matrix }}
-      kernel_version: ${{ steps.generate.outputs.kernel_version }}
+      susfs_version: ${{ steps.generate.outputs.susfs_version }}
       classified_matrix: ${{ steps.generate.outputs.classified_matrix }}
       matrix_summary: ${{ steps.generate.outputs.matrix_summary }}
       cache_key: ${{ steps.get_cache_key.outputs.cache_key }}
@@ -275,7 +275,10 @@ jobs:
       - name: Generate release body
         if: steps.prepare-summary.outputs.success != '0'
         run: |
-          python3 ${{ env.SCRIPTS_DIR }}/release_generator.py ${{ env.WORKSPACE_ROOT }}/release-files/RELEASE_BODY.md
+          python3 ${{ env.SCRIPTS_DIR }}/release_generator.py \
+            ${{ env.WORKSPACE_ROOT }}/release-files/RELEASE_BODY.md \
+            --susfs-version "${{ needs.prepare.outputs.susfs_version }}" \
+            --ksu-ref "${{ github.event.inputs.kernelsu_commit }}"
           echo "=== 发布内容 ==="
           cat release-files/RELEASE_BODY.md
 
@@ -284,8 +287,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         id: create_release
         with:
-          tag_name: ${{ needs.prepare.outputs.kernel_version }}
-          name: GKI Kernel ${{ needs.prepare.outputs.kernel_version }}
+          tag_name: ${{ needs.prepare.outputs.susfs_version }}
+          name: GKI Kernel ${{ needs.prepare.outputs.susfs_version }}
           draft: false
           generate_release_notes: false
           files: |
@@ -296,7 +299,7 @@ jobs:
         if: steps.prepare-summary.outputs.success != '0'
         id: get-release-url
         run: |
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.kernel_version }}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.susfs_version }}"
           echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
           echo "Release URL: $RELEASE_URL"
 
@@ -312,7 +315,7 @@ jobs:
           # 检查是否有成功的构建
           if [ "$SUCCESS" -gt 0 ]; then
             python3 ${{ env.SCRIPTS_DIR }}/telegram_notify.py release \
-              "${{ needs.prepare.outputs.kernel_version }}" \
+              "${{ needs.prepare.outputs.susfs_version }}" \
               "${{ steps.get-release-url.outputs.release_url }}" \
               "${{ env.WORKSPACE_ROOT }}/release-files/RELEASE_BODY.md" \
               "" \
@@ -321,7 +324,7 @@ jobs:
               "$FAILED"
           else
             python3 ${{ env.SCRIPTS_DIR }}/telegram_notify.py release \
-              "${{ needs.prepare.outputs.kernel_version }}" \
+              "${{ needs.prepare.outputs.susfs_version }}" \
               "${{ steps.get-release-url.outputs.release_url }}" \
               "" \
               "" \

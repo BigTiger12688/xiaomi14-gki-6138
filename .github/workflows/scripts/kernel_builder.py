@@ -129,16 +129,23 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         os.chdir(path)
         self.shell.cwd = str(path)
 
+    def _get_remote_ref(self, branch: str) -> str:
+        result = self._run_cmd(
+            f"git ls-remote https://android.googlesource.com/kernel/common refs/heads/{branch}",
+            capture_output=True,
+        )
+        return result.stdout.strip()
+
     def _apply_susfs_commit(self):
         if not self.config.susfs_commit or not self.susfs_dir.exists():
             return
         self._chdir(self.susfs_dir)
         if self.config.susfs_commit.startswith("HEAD~"):
-            self._run_cmd("git fetch origin", check=False)
-            self._run_cmd(f"git reset --hard {self.config.susfs_commit}", check=False)
+            self._run_cmd("git fetch origin")
+            self._run_cmd(f"git reset --hard {self.config.susfs_commit}")
         else:
-            self._run_cmd("git fetch origin", check=False)
-            self._run_cmd(f"git checkout {self.config.susfs_commit}", check=False)
+            self._run_cmd("git fetch origin")
+            self._run_cmd(f"git checkout {self.config.susfs_commit}")
         self._chdir(self.workspace)
 
     def clone_repositories(self):
@@ -150,11 +157,12 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             ("Kernel Patches", self.kernel_patches_dir, KERNEL_PATCHES_CONFIG['repo_url'], None),
         ]:
             if not repo_dir.exists():
-                cmd = f"git clone {url}"
+                cmd = f"git clone"
                 if branch:
                     cmd += f" -b {branch}"
+                cmd += f" {url} {repo_dir}"
                 logger.info(f"克隆 {name}...")
-                self._run_cmd(cmd, check=False)
+                self._run_cmd(cmd)
             else:
                 logger.info(f"{name} 已存在，跳过")
         self._apply_susfs_commit()
@@ -164,10 +172,10 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         logger.info("=== 克隆工具链 ===")
         if not self.toolchain_dir.exists():
             self._run_cmd(f"git clone {TOOLCHAIN_CONFIG['aosp_mirror']}/kernel/prebuilts/build-tools "
-                         f"-b {TOOLCHAIN_CONFIG['build_tools_branch']} --depth 1 {self.toolchain_dir}", check=False)
+                         f"-b {TOOLCHAIN_CONFIG['build_tools_branch']} --depth 1 {self.toolchain_dir}")
         if not self.mkbootimg_dir.exists():
             self._run_cmd(f"git clone {TOOLCHAIN_CONFIG['aosp_mirror']}/platform/system/tools/mkbootimg "
-                         f"-b {TOOLCHAIN_CONFIG['mkbootimg_branch']} --depth 1 {self.mkbootimg_dir}", check=False)
+                         f"-b {TOOLCHAIN_CONFIG['mkbootimg_branch']} --depth 1 {self.mkbootimg_dir}")
         self.env["AVBTOOL"] = str(self.toolchain_dir / "linux-x86/bin/avbtool")
         self.env["MKBOOTIMG"] = str(self.mkbootimg_dir / "mkbootimg.py")
         self.env["UNPACK_BOOTIMG"] = str(self.mkbootimg_dir / "unpack_bootimg.py")
@@ -182,8 +190,8 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         repo_dir.mkdir(exist_ok=True)
         repo_path = repo_dir / "repo"
         if not repo_path.exists():
-            self._run_cmd(f"curl https://storage.googleapis.com/git-repo-downloads/repo > {repo_path}", check=False)
-            self._run_cmd(f"chmod a+rx {repo_path}", check=False)
+            self._run_cmd(f"curl https://storage.googleapis.com/git-repo-downloads/repo > {repo_path}")
+            self._run_cmd(f"chmod a+rx {repo_path}")
         self.env["REPO"] = str(repo_path)
         self.shell.env = self.env
 
@@ -193,21 +201,33 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         formatted_branch = self.config.formatted_branch
 
         self._run_cmd(f"$REPO init --depth=1 --u https://android.googlesource.com/kernel/manifest "
-                     f"-b common-{formatted_branch} --repo-rev=v2.16", check=False)
+                     f"-b common-{formatted_branch} --repo-rev=v2.16")
 
-        remote = subprocess.run(f"git ls-remote https://android.googlesource.com/kernel/common {formatted_branch}",
-                               shell=True, capture_output=True, text=True).stdout.strip()
-        if "deprecated" in remote:
+        remote = self._get_remote_ref(formatted_branch)
+        if not remote:
+            deprecated_branch = f"deprecated/{formatted_branch}"
+            remote = self._get_remote_ref(deprecated_branch)
+            if remote:
+                manifest_path = self.work_dir / ".repo/manifests/default.xml"
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                content = content.replace(f'"{formatted_branch}"', f'"{deprecated_branch}"')
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            else:
+                raise RuntimeError(f"找不到内核分支: {formatted_branch}")
+
+        if "deprecated/" in remote:
             manifest_path = self.work_dir / ".repo/manifests/default.xml"
-            with open(manifest_path, "r") as f:
+            with open(manifest_path, "r", encoding="utf-8") as f:
                 content = f.read()
             content = content.replace(f'"{formatted_branch}"', f'"deprecated/{formatted_branch}"')
-            with open(manifest_path, "w") as f:
+            with open(manifest_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
         self.env["REMOTE_BRANCH"] = remote
         logger.info("同步内核源代码...")
-        self._run_cmd("$REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast", check=False)
+        self._run_cmd("$REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast")
 
         common_dir = self.work_dir / "common"
         if not common_dir.exists():
@@ -223,13 +243,13 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if is_deprecated and av == "android13" and kv == "5.15" and sub and sub < 123:
             common_dir = self.work_dir / "common"
             self._chdir(common_dir)
-            self._run_cmd(f"curl -LSs {LEGACY_FIXES['android13-5.15-below-123']['url']} -o fix.patch && patch -p1 < fix.patch", check=False)
+            self._run_cmd(f"curl -LSs {LEGACY_FIXES['android13-5.15-below-123']['url']} -o fix.patch && patch -p1 < fix.patch")
             self._chdir(self.work_dir)
 
         if av == "android12" and kv == "5.10" and sub and sub < 136:
             common_dir = self.work_dir / "common"
             self._chdir(common_dir)
-            self._run_cmd(f"curl -LSs {LEGACY_FIXES['android12-5.10-below-136']['url']} | patch -p1", check=False)
+            self._run_cmd(f"curl -LSs {LEGACY_FIXES['android12-5.10-below-136']['url']} | patch -p1")
             self._chdir(self.work_dir)
 
     def add_kernel_supatch(self):
@@ -240,7 +260,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if not drivers_dir.exists():
             return
         self._chdir(drivers_dir)
-        self._run_cmd(f"curl -LSs {OP8E_PATCH_URL} -o hmbird_patch.c", check=False)
+        self._run_cmd(f"curl -LSs {OP8E_PATCH_URL} -o hmbird_patch.c")
         if (drivers_dir / "hmbird_patch.c").exists():
             with open(drivers_dir / "Makefile", "a") as f:
                 f.write("obj-y += hmbird_patch.o\n")
@@ -252,12 +272,12 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
                     if self.config.kernelsu_commit else KSU_REPO_CONFIG["setup_script"])
         setup_ref = self.config.kernelsu_commit or ""
         setup_cmd = f"curl -LSs {setup_url} | bash -s -- {setup_ref}" if setup_ref else f"curl -LSs {setup_url} | bash -s --"
-        self._run_cmd(setup_cmd, check=False)
+        self._run_cmd(setup_cmd)
         if self.config.kernelsu_commit:
             ksu_dir = self.work_dir / "KernelSU"
             if ksu_dir.exists():
                 self._chdir(ksu_dir)
-                self._run_cmd(f"git checkout {self.config.kernelsu_commit}", check=False)
+                self._run_cmd(f"git checkout {self.config.kernelsu_commit}")
                 self._chdir(self.work_dir)
 
     def add_bbg(self):
@@ -268,7 +288,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if not common_dir.exists():
             return
         self._chdir(common_dir)
-        self._run_cmd(f"wget -O- {BBG_CONFIG['setup_script']} | bash", check=False)
+        self._run_cmd(f"wget -O- {BBG_CONFIG['setup_script']} | bash")
         config_file = common_dir / "arch/arm64/configs/gki_defconfig"
         if config_file.exists():
             with open(config_file, "a") as f:
@@ -289,18 +309,18 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         common_dir = self.work_dir / "common"
         susfs_patch = self.susfs_dir / "kernel_patches" / self.config.get_susfs_patch_filename()
         if susfs_patch.exists():
-            self._run_cmd(f"cp {susfs_patch} {common_dir}/", check=False)
+            self._run_cmd(f"cp {susfs_patch} {common_dir}/")
         for src, dst in [
             (self.susfs_dir / "kernel_patches/fs", common_dir / "fs/"),
             (self.susfs_dir / "kernel_patches/include/linux", common_dir / "include/linux/"),
         ]:
             if src.exists():
-                self._run_cmd(f"cp -r {src}/* {dst}", check=False)
+                self._run_cmd(f"cp -r {src}/* {dst}")
         if susfs_patch.exists():
             patch_file = common_dir / self.config.get_susfs_patch_filename()
             if patch_file.exists():
                 self._chdir(common_dir)
-                self._run_cmd(f"patch -p1 --fuzz=3 < {patch_file}", check=False)
+                self._run_cmd(f"patch -p1 --fuzz=3 < {patch_file}")
                 self._chdir(self.work_dir)
 
     def apply_sukisu_patches(self):
@@ -308,7 +328,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         self._chdir(self.work_dir / "common")
         hooks_patch = self.sukisu_patch_dir / "69_hide_stuff.patch"
         if hooks_patch.exists():
-            self._run_cmd(f"cp {hooks_patch} . && patch -p1 -F 3 < 69_hide_stuff.patch", check=False)
+            self._run_cmd(f"cp {hooks_patch} . && patch -p1 -F 3 < 69_hide_stuff.patch")
 
     def apply_zram_patches(self):
         if not self.config.use_zram:
@@ -322,12 +342,12 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             (self.sukisu_patch_dir / "other/zram/lz4k_oplus", "lib/"),
         ]:
             if src[0].exists():
-                self._run_cmd(f"cp -r {src[0]}/* {src[1]}", check=False)
+                self._run_cmd(f"cp -r {src[0]}/* {src[1]}")
         zram_patch_dir = self.sukisu_patch_dir / f"other/zram/zram_patch/{self.config.kernel_version}"
         for patch in ["lz4kd.patch", "lz4k_oplus.patch"]:
             p = zram_patch_dir / patch
             if p.exists():
-                self._run_cmd(f"patch -p1 -F 3 < {p}", check=False)
+                self._run_cmd(f"patch -p1 -F 3 < {p}")
 
     def apply_task_mmu_fixes(self):
         logger.info("=== 应用 task_mmu.c 修复 ===")
@@ -450,7 +470,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 
         setlocalversion = self.work_dir / "common/scripts/setlocalversion"
         if setlocalversion.exists():
-            with open(setlocalversion, "r") as f:
+            with open(setlocalversion, "r", encoding="utf-8") as f:
                 content = f.read()
             if safe_custom_version:
                 lines = content.split('\n')
@@ -458,12 +478,11 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
                     if 'echo "$res"' in line and not line.strip().startswith('#'):
                         lines[i] = f'\techo "{safe_custom_version}$res"'
                         break
-                with open(setlocalversion, "w") as f:
-                    f.write('\n'.join(lines))
+                content = '\n'.join(lines)
             if "-dirty" in content:
                 content = content.replace("-dirty", "")
-                with open(setlocalversion, "w") as f:
-                    f.write(content)
+            with open(setlocalversion, "w", encoding="utf-8") as f:
+                f.write(content)
 
         import datetime
         current_time = datetime.datetime.utcnow().strftime("%a %b %d %H:%M:%S UTC %Y")
@@ -613,9 +632,9 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if not image_dir.exists():
             return
         self._chdir(image_dir)
-        self._run_cmd(f"curl -LSs {KPM_PATCH_URL} -o patch && chmod 777 patch && ./patch", check=False)
+        self._run_cmd(f"curl -LSs {KPM_PATCH_URL} -o patch && chmod 777 patch && ./patch")
         if (image_dir / "oImage").exists():
-            self._run_cmd("mv oImage Image", check=False)
+            self._run_cmd("mv oImage Image")
 
     def prepare_boot_images(self) -> list:
         logger.info("=== 准备启动镜像 ===")
@@ -632,10 +651,10 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         for image_name in ["Image", "Image.lz4"]:
             src = image_source / image_name
             if src.exists():
-                self._run_cmd(f"cp {src} {bootimgs_dir}/ && cp {src} {self.work_dir}/", check=False)
+                self._run_cmd(f"cp {src} {bootimgs_dir}/ && cp {src} {self.work_dir}/")
 
         if (self.work_dir / "Image").exists():
-            self._run_cmd("gzip -n -k -f -9 Image", check=False)
+            self._run_cmd("gzip -n -k -f -9 Image")
 
         if self.config.android_version == "android12":
             self._prepare_android12_boot_images(bootimgs_dir, artifacts)
@@ -649,10 +668,10 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         fallback_url = "https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-2023-01_r1.zip"
         result = subprocess.run(f"curl -sL -w '%{{http_code}}' {gki_url} -o /dev/null", shell=True, capture_output=True, text=True)
         url = gki_url if "200" in result.stdout else fallback_url
-        self._run_cmd(f"curl -Lo gki-kernel.zip {url} && unzip -o gki-kernel.zip && rm gki-kernel.zip", check=False)
+        self._run_cmd(f"curl -Lo gki-kernel.zip {url} && unzip -o gki-kernel.zip && rm gki-kernel.zip")
         boot_img_path = bootimgs_dir / "boot-5.10.img"
         if boot_img_path.exists():
-            self._run_cmd(f"$UNPACK_BOOTIMG --boot_img={boot_img_path}", check=False)
+            self._run_cmd(f"$UNPACK_BOOTIMG --boot_img={boot_img_path}")
         self._create_boot_image_variants(bootimgs_dir, artifacts, has_ramdisk=True)
 
     def _prepare_boot_images_generic(self, bootimgs_dir: Path, artifacts: list):
@@ -662,7 +681,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
     def _create_boot_image_variants(self, bootimgs_dir: Path, artifacts: list, has_ramdisk: bool = False):
         self._chdir(bootimgs_dir)
         if (bootimgs_dir / "Image").exists():
-            self._run_cmd("gzip -n -k -f -9 Image", check=False)
+            self._run_cmd("gzip -n -k -f -9 Image")
 
         for kernel_file, output_file in [("Image", "boot.img"), ("Image.gz", "boot-gz.img"), ("Image.lz4", "boot-lz4.img")]:
             kernel_path = bootimgs_dir / kernel_file
@@ -671,10 +690,10 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             cmd = f"$MKBOOTIMG --header_version 4 --kernel {kernel_file} --output {output_file}"
             if has_ramdisk:
                 cmd += f" --ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level {self.config.os_patch_level}"
-            self._run_cmd(cmd, check=False)
-            self._run_cmd(f"$AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image {output_file} --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH", check=False)
+            self._run_cmd(cmd)
+            self._run_cmd(f"$AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image {output_file} --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH")
             dest = self.work_dir / f"{self.config.android_version}-{self.config.kernel_version}.{self.config.sub_level}-{self.config.os_patch_level}-{output_file}"
-            self._run_cmd(f"cp {output_file} {dest}", check=False)
+            self._run_cmd(f"cp {output_file} {dest}")
             artifacts.append(str(dest))
 
     def create_anykernel_zips(self) -> list:
@@ -683,16 +702,19 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         artifacts = []
         ak3_dir = self.anykernel_dir
 
-        for suffix in ["", "-lz4", "-gz"]:
-            image_file = f"Image{suffix}"
+        for image_file, zip_suffix in [("Image", ""), ("Image.lz4", "-lz4"), ("Image.gz", "-gz")]:
             image_path = self.work_dir / image_file
             if not image_path.exists():
                 continue
-            zip_name = f"{self.config.android_version}-{self.config.kernel_version}.{self.config.sub_level}-{self.config.os_patch_level}-AnyKernel3{suffix}.zip"
-            self._run_cmd(f"cp {image_path} {ak3_dir}/", check=False)
+            zip_name = f"{self.config.android_version}-{self.config.kernel_version}.{self.config.sub_level}-{self.config.os_patch_level}-AnyKernel3{zip_suffix}.zip"
+            for leftover in ["Image", "Image.gz", "Image.lz4"]:
+                leftover_path = ak3_dir / leftover
+                if leftover_path.exists():
+                    leftover_path.unlink()
+            self._run_cmd(f"cp {image_path} {ak3_dir}/")
             self._chdir(ak3_dir)
-            self._run_cmd(f"zip -r ../{zip_name} ./*", check=False)
-            self._run_cmd(f"rm {ak3_dir}/{image_file}", check=False)
+            self._run_cmd(f"zip -r ../{zip_name} ./* -x .git/*")
+            self._run_cmd(f"rm {ak3_dir}/{image_file}")
             artifacts.append(str(self.work_dir / zip_name))
             self._chdir(self.work_dir)
         return artifacts

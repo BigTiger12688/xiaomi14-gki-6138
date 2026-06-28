@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from config import KERNEL_VERSION
+from config import DEFAULT_BUILD_MATRIX, SUSFS_VERSION
+
+
+def _sub_level_sort_key(sub_level: str):
+    return (1, 0) if sub_level == "X" else (0, int(sub_level))
 
 
 def generate_build_matrix() -> list:
-    matrix_path = Path(__file__).parent.parent / "config" / "matrix.json"
-    with open(matrix_path, 'r') as f:
-        matrix = json.load(f)
-
     builds = []
-    for key, configs in matrix.items():
+    for key, configs in DEFAULT_BUILD_MATRIX.items():
         android, kernel = key.split('-')
         for cfg in configs:
             build = {
@@ -30,7 +30,7 @@ def generate_build_matrix() -> list:
     builds.sort(key=lambda x: (
         int(x["android"].replace("android", "")),
         float(x["kernel"]),
-        x["sub_level"] if x["sub_level"] != "X" else "ZZZZ"  # X (LTS) 排在最后
+        _sub_level_sort_key(x["sub_level"]),
     ))
 
     return builds
@@ -38,12 +38,8 @@ def generate_build_matrix() -> list:
 
 def generate_classified_matrix() -> dict:
     """生成按 Android 版本分类的矩阵"""
-    matrix_path = Path(__file__).parent.parent / "config" / "matrix.json"
-    with open(matrix_path, 'r') as f:
-        matrix = json.load(f)
-
     classified = {}
-    for key, configs in matrix.items():
+    for key, configs in DEFAULT_BUILD_MATRIX.items():
         android, kernel = key.split('-')
         if android not in classified:
             classified[android] = {}
@@ -57,10 +53,9 @@ def generate_classified_matrix() -> dict:
     for android in sorted(classified.keys(), key=lambda x: int(x.replace("android", ""))):
         sorted_classified[android] = {}
         for kernel in sorted(classified[android].keys(), key=lambda x: float(x)):
-            # 按 sub_level 排序，X (LTS) 排在最后
             sorted_classified[android][kernel] = sorted(
                 classified[android][kernel],
-                key=lambda x: x["sub_level"] if x["sub_level"] != "X" else "ZZZZ"
+                key=lambda x: _sub_level_sort_key(x["sub_level"])
             )
 
     return sorted_classified
@@ -74,10 +69,10 @@ def save_matrix_output():
     print(f"Matrix generated: {len(builds)} builds")
 
     # 保存版本号
-    version_output = f'kernel_version={KERNEL_VERSION}'
+    version_output = f'susfs_version={SUSFS_VERSION}'
     with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
         f.write(version_output + '\n')
-    print(f"Kernel version: {KERNEL_VERSION}")
+    print(f"SUSFS version: {SUSFS_VERSION}")
 
     # 同时保存分类后的矩阵
     classified = generate_classified_matrix()
@@ -106,8 +101,10 @@ def save_matrix_output():
             md_summary += f"- {kernel}: {sub_levels}\n"
         md_summary += "\n"
 
-    with open("matrix_summary.md", 'w', encoding='utf-8') as f:
-        f.write(md_summary)
+    github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_step_summary:
+        with open(github_step_summary, 'a', encoding='utf-8') as f:
+            f.write(md_summary)
 
 
 if __name__ == '__main__':

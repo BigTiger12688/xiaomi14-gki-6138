@@ -233,11 +233,11 @@ def main():
     action = sys.argv[1]
 
     if action == "single":
-        if len(sys.argv) < 8:
+        if len(sys.argv) < 9:
             print("错误: single 需要 7 个参数")
             sys.exit(1)
 
-        hashes_file = sys.argv[8] if len(sys.argv) > 8 else None
+        hashes_file = sys.argv[9] if len(sys.argv) > 9 else None
         if hashes_file and not os.path.exists(hashes_file):
             hashes_file = None
 
@@ -248,7 +248,7 @@ def main():
             os_patch_level=sys.argv[5],
             kernelsu_version=sys.argv[6],
             use_zram=sys.argv[7].lower() == "true",
-            use_kpm=True,
+            use_kpm=sys.argv[8].lower() == "true",
             hashes_file=hashes_file,
         )
         success = notifier.send_message(message)
