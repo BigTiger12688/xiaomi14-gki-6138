@@ -342,10 +342,11 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 
         if fb == "android15-6.6" and "unsigned int nr_subpages" not in content:
             self._fix_base_c_header()
-        elif fb == "android14-6.1" and "if (!vma_pages(vma))" not in content:
-            self._fix_base_c_header()
-            if "goto show_pad;" in content:
-                content = content.replace("goto show_pad;", "return 0;")
+        elif fb == "android14-6.1":
+            if "if (!vma_pages(vma))" not in content:
+                self._fix_base_c_header()
+                if "goto show_pad;" in content:
+                    content = content.replace("goto show_pad;", "return 0;")
             content = self._cleanup_task_mmu_dead_code(content)
             with open(task_mmu, "w") as f:
                 f.write(content)
